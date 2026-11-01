@@ -1,0 +1,58 @@
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "run_as_user": "root"
+  },
+  "metrics": {
+    "namespace": "Session15/ObservabilityDemo/Host",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "cpu": {
+        "measurement": [
+          "cpu_usage_idle",
+          "cpu_usage_user",
+          "cpu_usage_system"
+        ],
+        "metrics_collection_interval": 60,
+        "totalcpu": true
+      },
+      "mem": {
+        "measurement": [
+          "mem_used_percent"
+        ],
+        "metrics_collection_interval": 60
+      },
+      "disk": {
+        "measurement": [
+          "used_percent"
+        ],
+        "resources": [
+          "/"
+        ],
+        "metrics_collection_interval": 60
+      }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/opt/session15-observability-demo/logs/app-out.log",
+            "log_group_name": "/session15-observability-demo/application",
+            "log_stream_name": "{instance_id}/out",
+            "timezone": "UTC"
+          },
+          {
+            "file_path": "/opt/session15-observability-demo/logs/app-error.log",
+            "log_group_name": "/session15-observability-demo/errors",
+            "log_stream_name": "{instance_id}/error",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    }
+  }
+}

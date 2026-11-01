@@ -1,0 +1,15 @@
+{
+  "name": "session15-observability-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Native Node.js app for the Session 15 CloudWatch monitoring and logging demo",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "demo:traffic": "bash scripts/demo-traffic.sh"
+  }
+}

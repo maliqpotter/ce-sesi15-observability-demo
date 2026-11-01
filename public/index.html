@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Session 15 — Observability Demo</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { max-width: 900px; margin: 40px auto; padding: 0 20px; color: #172033; background: #f5f7fb; }
+      h1 { margin-bottom: 8px; color: #12345a; }
+      .intro, .panel { padding: 20px; border: 1px solid #d9e1ec; border-radius: 12px; background: white; }
+      .intro { margin-bottom: 18px; }
+      .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+      button { border: 0; border-radius: 8px; padding: 11px 15px; color: white; background: #1769aa; cursor: pointer; font: inherit; }
+      button:hover { background: #0f4f85; }
+      button.error { background: #b42318; }
+      button.slow { background: #a15c00; }
+      code { color: #173b62; }
+      pre { min-height: 100px; overflow: auto; padding: 14px; border-radius: 8px; background: #101828; color: #e6edf5; white-space: pre-wrap; }
+      .note { color: #526175; font-size: 0.95rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Session 15: Monitoring &amp; Logging</h1>
+    <p class="note">Native Node.js demo app — use these buttons to generate traffic, latency, and a controlled application error.</p>
+
+    <section class="intro">
+      <strong>Demo flow</strong>
+      <ol>
+        <li>Send a normal request and find its structured log in CloudWatch Logs.</li>
+        <li>Trigger latency or an error, then inspect metrics, logs, and alarms.</li>
+        <li>Compare the <code>request_id</code> and optional <code>trace_id</code> across related log events.</li>
+      </ol>
+      <p class="note">The slow and error endpoints are for a restricted classroom environment only. Do not expose this demo publicly.</p>
+    </section>
+
+    <section class="panel">
+      <strong>Generate a request</strong>
+      <div class="buttons">
+        <button data-path="/api/orders">Normal request</button>
+        <button data-path="/api/checkout">Checkout + simulated dependency</button>
+        <button class="slow" data-path="/api/slow?ms=1500">Slow request (1.5s)</button>
+        <button class="error" data-path="/api/error">Simulate HTTP 500</button>
+      </div>
+      <p class="note">Health check: <a href="/healthz"><code>/healthz</code></a></p>
+      <pre id="output">Click a button to send a request. Response details appear here.</pre>
+    </section>
+
+    <script>
+      const output = document.getElementById("output");
+      for (const button of document.querySelectorAll("button[data-path]")) {
+        button.addEventListener("click", async () => {
+          output.textContent = `Sending ${button.dataset.path} ...`;
+          const started = performance.now();
+          try {
+            const response = await fetch(button.dataset.path);
+            const payload = await response.json();
+            output.textContent = JSON.stringify({
+              http_status: response.status,
+              elapsed_ms: Math.round(performance.now() - started),
+              response_request_id: response.headers.get("x-request-id"),
+              response_trace_id: response.headers.get("x-trace-id"),
+              body: payload,
+            }, null, 2);
+          } catch (error) {
+            output.textContent = `Request failed: ${error.message}`;
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
