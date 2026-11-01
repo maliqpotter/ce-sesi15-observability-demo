@@ -55,67 +55,191 @@ BASE_URL=http://EC2_PUBLIC_IP:3000 bash scripts/demo-traffic.sh
 
 Jangan membuka port 3000 ke `0.0.0.0/0`; gunakan IP tepercaya untuk latihan.
 
-## Deploy native di EC2 dengan PM2
+## Deploy dan Jalankan di EC2 dengan PM2
 
-1. Install Node.js 20+ untuk AMI yang digunakan, lalu verifikasi `node --version` dan `npm --version`.
-2. Salin folder ini ke EC2, misalnya ke `/opt/session15-observability-demo`.
-3. Buat folder log dan pasang PM2:
+Langkah berikut menggunakan `APP_DIR` agar tidak bergantung pada nama folder tertentu. Ganti contoh path dengan lokasi project di instance. Variabel ini hanya berlaku pada shell saat ini; tetapkan lagi saat membuka SSH session baru.
+
+### Persiapan awal
+
+1. Install Node.js 20+ dan npm untuk AMI yang digunakan. Verifikasi:
 
    ```bash
-   cd /opt/session15-observability-demo
-   mkdir -p logs
+   node --version
+   npm --version
+   ```
+
+2. Salin/clone project ke EC2. Contoh:
+
+   ```bash
+   APP_DIR="$HOME/session15-observability-demo" # ganti dengan path yang dipilih
+   # Jika menggunakan Git:
+   git clone <REPO_URL> "$APP_DIR"
+   # Jika file sudah disalin ke EC2, cukup masuk ke folder tersebut:
+   cd "$APP_DIR"
+   ```
+
+3. Install dependency (project ini tidak memiliki dependency aplikasi eksternal), siapkan log folder, dan pasang PM2 jika belum ada:
+
+   ```bash
    npm ci --omit=dev
+   mkdir -p logs
    sudo npm install --global pm2
    ```
 
-4. Jalankan app:
+   Jangan jalankan perintah PM2 dengan `sudo`; jalankan sebagai user Linux yang memiliki project dan akan menjalankan aplikasi.
 
-   ```bash
-   pm2 start ecosystem.config.cjs
-   pm2 status
-   pm2 logs session15-observability-demo
-   ```
-
-5. Supaya PM2 hidup kembali setelah reboot, jalankan `pm2 startup`, ikuti perintah yang dicetak PM2, lalu:
-
-   ```bash
-   pm2 save
-   ```
-
-6. Di Security Group EC2, izinkan TCP 3000 hanya dari IP kelas/jaringan lab. Buka `http://EC2_PUBLIC_IP:3000` dari browser yang diizinkan.
-
-Perintah berguna saat demo:
+### Start aplikasi
 
 ```bash
-pm2 restart session15-observability-demo
+APP_DIR="$HOME/session15-observability-demo" # ganti dengan path project di EC2
+cd "$APP_DIR"
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+Verifikasi process, endpoint, dan lokasi file log:
+
+```bash
+pm2 status
+pm2 describe session15-observability-demo
+curl -i http://127.0.0.1:3000/healthz
+ls -lh "$APP_DIR/logs"
+```
+
+`ecosystem.config.cjs` mengatur log ke `logs/app-out.log` dan `logs/app-error.log` relatif terhadap folder project.
+
+### Perintah operasional PM2
+
+```bash
+pm2 status
+pm2 logs session15-observability-demo
+pm2 restart session15-observability-demo --update-env
 pm2 stop session15-observability-demo
 pm2 start ecosystem.config.cjs
 ```
 
-PM2 cocok untuk demo karena mudah dilihat status, restart, dan log-nya. **systemd** adalah alternatif native tanpa PM2 dan sering lebih sesuai dengan standar operasional server; jika memakai systemd, sesuaikan lagi konfigurasi CloudWatch Agent untuk sumber log yang digunakan.
+### Update aplikasi
 
-## Hubungkan ke CloudWatch
+Untuk deployment dari Git:
 
-1. Pasang EC2 instance profile dengan izin CloudWatch Agent. Jangan menyimpan access key AWS di source code atau file `.env`.
-2. Install **Amazon CloudWatch Agent** untuk AMI yang digunakan.
-3. File konfigurasi contoh ada di `config/cloudwatch-agent.json`. File itu mengumpulkan PM2 stdout/stderr dari:
-   - `/opt/session15-observability-demo/logs/app-out.log`
-   - `/opt/session15-observability-demo/logs/app-error.log`
-4. Jika aplikasi diletakkan di path lain, ubah `file_path` pada konfigurasi sebelum menjalankan agent.
-5. Jalankan konfigurasi agent:
+```bash
+APP_DIR="$HOME/session15-observability-demo" # ganti dengan path project di EC2
+cd "$APP_DIR"
+git pull --ff-only
+npm ci --omit=dev
+pm2 restart session15-observability-demo --update-env
+pm2 save
+```
 
-   ```bash
-   sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
-     -a fetch-config -m ec2 \
-     -c file:/opt/session15-observability-demo/config/cloudwatch-agent.json \
-     -s
-   ```
+Jika `ecosystem.config.cjs` ikut berubah, muat ulang definisi app dari file ecosystem:
 
-6. Jalankan `npm run demo:traffic`, lalu periksa log group:
-   - `/session15-observability-demo/application`
-   - `/session15-observability-demo/errors`
+```bash
+APP_DIR="$HOME/session15-observability-demo" # ganti dengan path project di EC2
+cd "$APP_DIR"
+pm2 startOrReload ecosystem.config.cjs
+pm2 save
+```
 
-CloudWatch Agent mengirim host metrics ke `Session15/ObservabilityDemo/Host`. EMF di application log akan menghasilkan custom metrics di `Session15/ObservabilityDemo`; tunggu beberapa menit untuk ingestion. Atur retention log group sesuai durasi latihan agar log tidak tersimpan tanpa batas.
+Jika project tidak menggunakan Git, salin file versi terbaru ke `$APP_DIR`, lalu jalankan `npm ci --omit=dev` dan restart PM2 seperti di atas.
+
+### Aktifkan PM2 saat reboot
+
+Jalankan `pm2 startup`, ikuti perintah `sudo` yang dicetak PM2, kemudian simpan process list:
+
+```bash
+pm2 startup
+pm2 save
+```
+
+Di Security Group EC2, batasi TCP 3000 ke IP/jaringan kelas. Jangan membuka port tersebut ke `0.0.0.0/0` untuk demo.
+
+PM2 digunakan pada panduan ini karena mudah untuk demo dan mengelola file log. **systemd** juga dapat menjalankan Node.js secara native; jika memilih systemd, atur CloudWatch Agent untuk membaca sumber log systemd yang digunakan.
+
+## Hubungkan dan Jalankan CloudWatch Agent
+
+### 1. IAM role dan jaringan
+
+- Pasang EC2 instance profile/role dengan policy `CloudWatchAgentServerPolicy` atau izin least-privilege yang setara untuk mengirim logs dan metrics.
+- Nama role boleh berbeda. Yang penting role tersebut terpasang pada EC2 dan memiliki izin yang diperlukan.
+- Jangan menyimpan AWS access key di source code atau file `.env`.
+- Instance perlu akses HTTPS keluar ke CloudWatch. Untuk private subnet, sediakan NAT atau VPC endpoints yang diperlukan.
+
+### 2. Install CloudWatch Agent
+
+Pilih cara install sesuai AMI. Contoh Ubuntu:
+
+```bash
+cd /tmp
+ARCH=$(dpkg --print-architecture)
+curl -fLo amazon-cloudwatch-agent.deb \
+  "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/${ARCH}/latest/amazon-cloudwatch-agent.deb"
+sudo dpkg -i -E ./amazon-cloudwatch-agent.deb
+```
+
+Untuk Amazon Linux 2023 gunakan `sudo dnf install -y amazon-cloudwatch-agent`; untuk Amazon Linux 2 gunakan `sudo yum install -y amazon-cloudwatch-agent`.
+
+### 3. Buat konfigurasi khusus untuk path instance
+
+Template `config/cloudwatch-agent.json` mengarah ke `/opt/session15-observability-demo`. Agar tidak mengubah file template atau mengasumsikan nama folder EC2, buat salinan runtime di `/tmp` dengan path app yang sebenarnya:
+
+```bash
+APP_DIR="$HOME/session15-observability-demo" # ganti dengan path project di EC2
+cd "$APP_DIR"
+APP_DIR="$(pwd)"
+
+sed "s#/opt/session15-observability-demo#${APP_DIR}#g" \
+  "$APP_DIR/config/cloudwatch-agent.json" \
+  > /tmp/session15-cloudwatch-agent.json
+
+grep -n file_path /tmp/session15-cloudwatch-agent.json
+```
+
+Pastikan hasilnya menunjuk ke file log PM2 yang nyata. Periksa dengan `pm2 describe session15-observability-demo`; jika PM2 menulis ke lokasi selain `$APP_DIR/logs/`, sesuaikan `file_path` pada salinan di `/tmp` tersebut.
+
+### 4. Start atau update konfigurasi agent
+
+```bash
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 \
+  -c file:/tmp/session15-cloudwatch-agent.json \
+  -s
+```
+
+Perintah yang sama dapat dijalankan lagi setelah konfigurasi berubah untuk memuat ulang agent.
+
+Verifikasi agent dan log diagnostiknya:
+
+```bash
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a status
+sudo journalctl -u amazon-cloudwatch-agent -n 50 --no-pager
+```
+
+### 5. Generate traffic dan verifikasi di CloudWatch
+
+Jalankan traffic **setelah agent aktif** supaya menghasilkan log baru:
+
+```bash
+APP_DIR="$HOME/session15-observability-demo" # ganti dengan path project di EC2
+cd "$APP_DIR"
+npm run demo:traffic
+```
+
+Di CloudWatch Console, pilih region yang sama dengan EC2, lalu cek log groups:
+
+- `/session15-observability-demo/application`
+- `/session15-observability-demo/errors`
+
+CloudWatch Agent mengirim host metrics ke namespace `Session15/ObservabilityDemo/Host`. Log EMF dari app menghasilkan custom metrics di `Session15/ObservabilityDemo`: `RequestCount`, `ErrorCount`, `SlowRequestCount`, dan `RequestDurationMs`. Metrik baru muncul setelah request dikirim dan mungkin perlu beberapa menit untuk ingestion.
+
+Atur retention log groups sesuai durasi kelas agar log tidak tersimpan tanpa batas.
+
+### Update/reload CloudWatch Agent
+
+Jika path app atau konfigurasi CloudWatch berubah:
+
+1. Buat ulang `/tmp/session15-cloudwatch-agent.json` dengan langkah 3.
+2. Jalankan ulang perintah `amazon-cloudwatch-agent-ctl -a fetch-config ... -s` pada langkah 4.
+3. Periksa status agent dan log groups kembali.
 
 ## Contoh demo di console
 
